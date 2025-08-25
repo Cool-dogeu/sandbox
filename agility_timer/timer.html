@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>cool-dog.eu Agility Timer</title>
+    <link rel="icon" type="image/png" href="assets/images/logo.png">
+    <link rel="shortcut icon" type="image/png" href="assets/images/logo.png">
+    <link rel="stylesheet" href="assets/css/styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <header class="app-header">
+            <div class="logo-container">
+                <img src="assets/images/logo.png" alt="CoolDog" class="logo">
+                <h1>Agility Timer Online</h1>
+            </div>
+            <div class="connection-status">
+                <span class="status-led" :class="statusLedClass"></span>
+                <span>{{ connectionStatus }}</span>
+                <img src="assets/images/logo.png" alt="CoolDog" class="header-logo" @click="openWebsite">
+            </div>
+        </header>
+
+        <main class="main-container">
+            <section class="timer-section">
+                <div class="section-header">
+                    <h2>Latest Result</h2>
+                    <button @click="copyLatestResult" class="btn btn-secondary" :class="{ 'copy-success': copyButtonEffect === 'latest' }">
+                        <i class="material-icons">{{ copyButtonEffect === 'latest' ? 'check' : 'content_copy' }}</i>
+                        {{ copyButtonEffect === 'latest' ? 'Copied!' : 'Copy' }}
+                    </button>
+                </div>
+                <div class="timer-display" :class="{ running: isRunning }" @dblclick="copyLatestResult" title="Double-click to copy">
+                    <div class="timer-value">{{ displayTime }}</div>
+                    <div class="timer-status">{{ timerStatus }}</div>
+                </div>
+                
+                <div class="precision-toggle">
+                    <label class="checkbox-label">
+                        <input type="checkbox" v-model="settings.highPrecisionTime" @change="updateDisplayPrecision">
+                        High Precision (3 decimals)
+                    </label>
+                </div>
+                
+              <div class="control-buttons">
+    <button @click="toggleConnection" class="btn" :class="{ 'btn-danger': isConnected, 'btn-primary': !isConnected }">
+        <i class="material-icons">{{ isConnected ? 'usb_off' : 'usb' }}</i>
+        {{ isConnected ? 'Disconnect' : 'Connect' }}
+    </button>
+    <button @click="openSettings" class="btn btn-secondary">
+        <i class="material-icons">settings</i>
+        Settings
+    </button>
+    <a href="https://agilitytimer.online/manual.html" target="_blank" class="btn btn-secondary">
+        <i class="material-icons">info</i>
+        Info
+    </a>
+</div>
+            </section>
+
+            <section class="results-section">
+                <div class="section-header">
+                    <h2>Result History</h2>
+                    <button @click="copySelectedResult" class="btn btn-secondary" :class="{ 'copy-success': copyButtonEffect === 'selected' }" :disabled="!selectedResult">
+                        <i class="material-icons">{{ copyButtonEffect === 'selected' ? 'check' : 'content_copy' }}</i>
+                        {{ copyButtonEffect === 'selected' ? 'Copied!' : 'Copy Selected' }}
+                    </button>
+                </div>
+                <div class="results-table-container">
+                    <table class="results-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>run time</th>
+                                <th>Timestamp</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="(result, index) in results" :key="index" 
+                                @click="selectResult(index)" 
+                                @dblclick="copyResultRow(index)"
+                                :class="{ selected: selectedResultIndex === index }"
+                                title="Click to select, double-click to copy">
+                                <td>{{ results.length - index }}</td>
+                                <td :class="'result-' + result.status">{{ formatResultDisplay(result) }}</td>
+                                <td>{{ result.timestamp }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="results-actions">
+                    <button @click="exportResults" class="btn btn-secondary" :disabled="results.length === 0">
+                        <i class="material-icons">download</i>
+                        Export CSV
+                    </button>
+                    <button @click="confirmClearResults" class="btn btn-danger" :disabled="results.length === 0">
+                        <i class="material-icons">clear_all</i>
+                        Clear Results
+                    </button>
+                </div>
+            </section>
+        </main>
+
+        <!-- Debug Console -->
+        <div v-if="showDebugConsole" class="debug-console">
+            <div class="debug-header">
+                <h3>Debug Console</h3>
+                <button @click="clearDebugConsole" class="btn btn-small">Clear</button>
+            </div>
+            <div class="debug-content">
+                <div class="debug-section">
+                    <h4>Test Runner:</h4>
+                    <div class="test-controls">
+                        <button @click="startTestRuns" :disabled="testRunning" class="btn btn-small btn-primary">
+                            Start Test Runs
+                        </button>
+                        <button @click="stopTestRuns" :disabled="!testRunning" class="btn btn-small btn-danger">
+                            Stop Test Runs
+                        </button>
+                        <span class="test-status">{{ testRunning ? 'Running automated tests...' : 'Test runner stopped' }}</span>
+                    </div>
+                </div>
+                <div class="debug-section">
+                    <h4>Raw Data Buffer (last 1000 chars):</h4>
+                    <pre>{{ rawDataBuffer || 'No data received yet...' }}</pre>
+                </div>
+                <div class="debug-section">
+                    <h4>Debug Messages:</h4>
+                    <div class="debug-messages">
+                        <div v-for="(msg, index) in debugMessages" :key="index" class="debug-message">
+                            {{ msg }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- Clear Results Confirmation Modal -->
+        <div v-if="showClearConfirmation" class="modal-backdrop" @click="cancelClearResults">
+            <div class="modal confirmation-modal" @click.stop>
+                <h2>Clear Results</h2>
+                <p>Are you sure you want to clear all results? This action cannot be undone.</p>
+                <div class="modal-buttons">
+                    <button @click="clearResults" class="btn btn-danger">Clear All Results</button>
+                    <button @click="cancelClearResults" class="btn btn-secondary">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Modal -->
+        <div v-if="showSettings" class="modal-backdrop" @click="cancelSettings">
+            <div class="modal settings-modal" @click.stop>
+                <h2>Settings</h2>
+                
+                <div class="settings-section">
+                    <h3>API Integration</h3>
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" v-model="tempSettings.apiEnabled">
+                            Enable API Integration
+                        </label>
+                    </div>
+                    
+                    <div v-if="tempSettings.apiEnabled" class="api-settings">
+                        <div class="form-group">
+                            <label for="apiEndpoint">API Endpoint URL</label>
+                            <input type="text" id="apiEndpoint" v-model="tempSettings.apiEndpoint" class="form-control" placeholder="https://example.com/api?apikey=[key]&time=[time_no_decimal]&status=[status]">
+                            <small class="form-help">
+                                You can use placeholders: <strong>[key]</strong>, <strong>[time]</strong>, <strong>[time_no_decimal]</strong>, <strong>[decimals]</strong>, <strong>[status]</strong>, <strong>[timestamp]</strong>
+                            </small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="apiMethod">HTTP Method</label>
+                            <select id="apiMethod" v-model="tempSettings.apiMethod" class="form-control">
+                                <option value="POST">POST</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="apiKey">API Key</label>
+                            <div style="position: relative;">
+                                <input :type="showApiKey ? 'text' : 'password'" id="apiKey" v-model="tempSettings.apiKey" class="form-control" placeholder="Enter your API key" style="padding-right: 40px;">
+                                <button type="button" @click="showApiKey = !showApiKey" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: transparent; border: none; cursor: pointer; padding: 5px;">
+                                    <span v-if="showApiKey">🙈</span>
+                                    <span v-else>👁️</span>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <button @click="testApiConnection" class="btn btn-secondary" :disabled="!tempSettings.apiEndpoint || apiTestInProgress">
+                                <i class="material-icons">{{ apiTestInProgress ? 'hourglass_empty' : 'wifi_tethering' }}</i>
+                                {{ apiTestInProgress ? 'Testing...' : 'Test Connection' }}
+                            </button>
+                            <span v-if="apiTestResult" class="api-test-result" :class="{ 'success': apiTestResult.success, 'error': !apiTestResult.success }">
+                                {{ apiTestResult.message }}
+                            </span>
+                        </div>
+
+                        <h4>Status Code Mapping</h4>
+                        <div class="form-group">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <input type="checkbox" id="enableStartedApi" v-model="tempSettings.apiStartedEnabled" class="form-control" style="width: auto;">
+                                <label for="enableStartedApi" style="margin: 0;">Timer Started (Dog begins)</label>
+                            </div>
+                            <input type="number" id="statusStarted" v-model="tempSettings.statusMappings.started" class="form-control" placeholder="3" :disabled="!tempSettings.apiStartedEnabled">
+                        </div>
+                        
+                        <div class="form-group">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <input type="checkbox" id="enableFinishedApi" v-model="tempSettings.apiFinishedEnabled" class="form-control" style="width: auto;">
+                                <label for="enableFinishedApi" style="margin: 0;">Timer Finished (Result)</label>
+                            </div>
+                            <input type="number" id="statusFinished" v-model="tempSettings.statusMappings.finished" class="form-control" placeholder="4" :disabled="!tempSettings.apiFinishedEnabled">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal-buttons">
+                    <button @click="saveSettings" class="btn btn-primary">Save Settings</button>
+                    <button @click="cancelSettings" class="btn btn-secondary">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Debug Toggle Button -->
+        <button @click="toggleDebugConsole" class="debug-toggle" :class="{ active: showDebugConsole }" title="Toggle Debug Console">
+            <i class="material-icons">{{ showDebugConsole ? 'bug_report' : 'code' }}</i>
+        </button>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js"></script>
+    <script src="assets/js/app.js"></script>
+</body>
+</html>
